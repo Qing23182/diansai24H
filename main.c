@@ -10,9 +10,7 @@ uint32_t imu_update_last_us = 0;
 uint32_t euler_vofa_last_us = 0;
 uint8_t imu_status = ICM42688_NO_SENSOR;
 
-#define GRAY_UPDATE_PERIOD_MS (50U)
-#define IMU_UPDATE_PERIOD_US  (20000U)
-#define EULER_VOFA_PERIOD_US  (30000U)
+
 
 //void duty_10hz(void)
 //{

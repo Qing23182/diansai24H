@@ -39,6 +39,13 @@ typedef double fp64;                 /* 64 位浮点数 */
 #define VOFA_CMD_FRAME_SIZE 11
 
 
+//采样周期，20ms一次IMU解算，30msvofa发送数据，50ms灰度采样
+#define GRAY_UPDATE_PERIOD_MS (50)
+#define IMU_UPDATE_PERIOD_US  (20000)
+#define EULER_VOFA_PERIOD_US  (30000)
+
+
+
 //vofa数据枚举
 typedef enum {
     VOFA_PID_LEFT  = 'L',//左轮速度环
@@ -111,7 +118,7 @@ typedef enum {
 
 /* 电机结构 */
 typedef struct {
-	Motor_State state;                           /*电机状态*/
+	Motor_State state;                           /*电机状态，即pid模式*/
 	  int ERF;                                   /*编码器读取频率*/
 	  int EL;                                     /*编玛器线数*/
 	  float TR;                                  /*轮胎半径*/	  
