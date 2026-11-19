@@ -1,6 +1,32 @@
 #include "GraySensor.h"
 
-extern Car_t Car ;
+void GraySensor_RecalcNorm(GraySensor_t* GraySensor)
+{
+	if (GraySensor == NULL) {
+		return;
+	}
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (GraySensor->calibrated_black[i] >= GraySensor->calibrated_white[i])
+		{
+			uint16_t temp = GraySensor->calibrated_white[i];
+			GraySensor->calibrated_white[i] = GraySensor->calibrated_black[i];
+			GraySensor->calibrated_black[i] = temp;
+		}
+
+		if ((GraySensor->calibrated_white[i] == 0 && GraySensor->calibrated_black[i] == 0) ||
+			(GraySensor->calibrated_white[i] == GraySensor->calibrated_black[i]))
+		{
+			GraySensor->normal_factor[i] = 0.0f;
+		}
+		else
+		{
+			float dynamic_range = (float)(GraySensor->calibrated_white[i] - GraySensor->calibrated_black[i]);
+			GraySensor->normal_factor[i] = (float)GraySensor->adc_bits / dynamic_range;
+		}
+	}
+}
 
 
 void GraySensorInit(GraySensor_t** GraySensor)
@@ -37,7 +63,7 @@ void GraySensorInit(GraySensor_t** GraySensor)
 		graysensor.BinaryData = 0xFF;
 		graysensor.GraySensorNoData = 0xFF;
 		
-		// ³õÊ¼»¯ADCÔ­Ê¼Öµ
+		// åˆå§‹åŒ–ADCåŸå§‹å€¼
 		graysensor.adc0_raw = 0;
 		graysensor.adc1_raw = 0;
 		graysensor.adc2_raw = 0;
@@ -47,54 +73,32 @@ void GraySensorInit(GraySensor_t** GraySensor)
 		graysensor.adc6_raw = 0;
 		graysensor.adc7_raw = 0;
 		
-		// ÉèÖÃADCÎ»Êı¶ÔÓ¦µÄÂúÁ¿³ÌÖµ£¨12Î»ADC£©
+		// è®¾ç½®ADCä½æ•°å¯¹åº”çš„æ»¡é‡ç¨‹å€¼ï¼ˆ12ä½ADCï¼‰
 		graysensor.adc_bits = 4096;
+		graysensor.last_turn_angle = 0.0f;
 		
-		// ÊÖ¶¯ÉèÖÃĞ£×¼Êı¾İ - °×É«Öµ£¨´«¸ĞÆ÷ÔÚ°×É«±íÃæÉÏµÄADC¶ÁÊı£©
-		graysensor.calibrated_white[0] = 3244;  // bit0°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[1] = 3076;  // bit1°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[2] = 3150;  // bit2°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[3] = 3177;  // bit3°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[4] = 3215;  // bit4°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[5] = 2965;  // bit5°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[6] = 3198;  // bit6°×É«Ğ£×¼Öµ
-		graysensor.calibrated_white[7] = 3149;  // bit7°×É«Ğ£×¼Öµ
+		// æ‰‹åŠ¨è®¾ç½®æ ¡å‡†æ•°æ® - ç™½è‰²å€¼ï¼ˆä¼ æ„Ÿå™¨åœ¨ç™½è‰²è¡¨é¢ä¸Šçš„ADCè¯»æ•°ï¼‰
+		graysensor.calibrated_white[0] = 3244;  // bit0ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[1] = 3076;  // bit1ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[2] = 3150;  // bit2ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[3] = 3177;  // bit3ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[4] = 3215;  // bit4ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[5] = 2965;  // bit5ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[6] = 3198;  // bit6ç™½è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_white[7] = 3149;  // bit7ç™½è‰²æ ¡å‡†å€¼
 		
-		// ÊÖ¶¯ÉèÖÃĞ£×¼Êı¾İ - ºÚÉ«Öµ£¨´«¸ĞÆ÷ÔÚºÚÉ«ÏßÉÏµÄADC¶ÁÊı£©
-		graysensor.calibrated_black[0] = 1250;   // bit0ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[1] = 490;   // bit1ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[2] = 316;   // bit2ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[3] = 252;   // bit3ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[4] = 937;   // bit4ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[5] = 566;   // bit5ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[6] = 302;   // bit6ºÚÉ«Ğ£×¼Öµ
-		graysensor.calibrated_black[7] = 974;   // bit7ºÚÉ«Ğ£×¼Öµ
+		// æ‰‹åŠ¨è®¾ç½®æ ¡å‡†æ•°æ® - é»‘è‰²å€¼ï¼ˆä¼ æ„Ÿå™¨åœ¨é»‘è‰²çº¿ä¸Šçš„ADCè¯»æ•°ï¼‰
+		graysensor.calibrated_black[0] = 1250;   // bit0é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[1] = 490;   // bit1é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[2] = 316;   // bit2é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[3] = 252;   // bit3é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[4] = 937;   // bit4é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[5] = 566;   // bit5é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[6] = 302;   // bit6é»‘è‰²æ ¡å‡†å€¼
+		graysensor.calibrated_black[7] = 974;   // bit7é»‘è‰²æ ¡å‡†å€¼
 		
-		// ¼ÆËã¹éÒ»»¯ÏµÊı
-		for(int i = 0; i < 8; i++)
-		{
-			// È·±£°×Öµ > ºÚÖµ£¨±ØÒªÊ±½»»»£©
-			if(graysensor.calibrated_black[i] >= graysensor.calibrated_white[i])
-			{
-				uint16_t temp = graysensor.calibrated_white[i];
-				graysensor.calibrated_white[i] = graysensor.calibrated_black[i];
-				graysensor.calibrated_black[i] = temp;
-			}
-			
-			// ´¦ÀíÎŞĞ§Ğ£×¼Êı¾İ£¨È«ºÚ/È«°×/ÏàµÈÇé¿ö£©
-			if ((graysensor.calibrated_white[i] == 0 && graysensor.calibrated_black[i] == 0) ||
-				  (graysensor.calibrated_white[i] == graysensor.calibrated_black[i]))
-			{
-				graysensor.normal_factor[i] = 0.0f;  // ÎŞĞ§Í¨µÀ
-			}
-			else
-			{
-				// ¼ÆËã¶¯Ì¬·¶Î§
-				float dynamic_range = (float)(graysensor.calibrated_white[i] - graysensor.calibrated_black[i]);
-				// ¼ÆËã¹éÒ»»¯ÏµÊı
-				graysensor.normal_factor[i] = (float)graysensor.adc_bits / dynamic_range;
-			}
-		}
+		// è®¡ç®—å½’ä¸€åŒ–ç³»æ•°
+		GraySensor_RecalcNorm(&graysensor);
 }
 
 #define GRAY_SENSOR_CHANNEL_COUNT       8U
@@ -141,6 +145,84 @@ void SET_SELECTOR(uint8_t pin2, uint8_t pin1, uint8_t pin0)
 	else DL_GPIO_clearPins(GraySensor_PIN_0_PORT, GraySensor_PIN_0_PIN);
 }
 
+void GraySensor_CalibrateSample(GraySensor_t* GraySensor, uint8_t is_white)
+{
+	uint32_t sum[GRAY_SENSOR_CHANNEL_COUNT] = {0};
+	const uint8_t avg_rounds = 16U;
+
+	if (GraySensor == NULL) {
+		return;
+	}
+
+	for (uint8_t r = 0U; r < avg_rounds; r++) {
+		for (uint8_t ch = 0U; ch < GRAY_SENSOR_CHANNEL_COUNT; ch++) {
+			SET_SELECTOR((uint8_t)((ch >> 2U) & 0x01U),
+						 (uint8_t)((ch >> 1U) & 0x01U),
+						 (uint8_t)(ch & 0x01U));
+			delay_us(GRAYSENSOR_MUX_SETTLE_US);
+			sum[ch] += GraySensorReadADC();
+		}
+		delay_ms(2U);
+	}
+	SET_SELECTOR(0U, 0U, 0U);
+
+	for (uint8_t ch = 0U; ch < GRAY_SENSOR_CHANNEL_COUNT; ch++) {
+		uint16_t avg = (uint16_t)(sum[ch] / avg_rounds);
+		if (is_white != 0U) {
+			GraySensor->calibrated_white[ch] = avg;
+		} else {
+			GraySensor->calibrated_black[ch] = avg;
+		}
+	}
+}
+
+void GraySensor_RunCalibration(GraySensor_t* GraySensor, Buzzer_t* buzzer)
+{
+	if (GraySensor == NULL) {
+		return;
+	}
+
+	(void)Key_check(0U, KEY_FLAG_DOWN | KEY_FLAG_SINGLE);
+	(void)Key_check(2U, KEY_FLAG_DOWN | KEY_FLAG_SINGLE | KEY_FLAG_DOUBLE);
+
+	/* Step 1: sample white background */
+	LCD_ShowStatusLine("CAL:WHITE K1/K3", LCD_CYAN);
+	BuzzerBee(buzzer);
+	while (1) {
+		BuzzerDataUpdate(buzzer);
+		if (Key_check(2U, KEY_FLAG_DOWN)) {
+			LCD_ShowStatusLine("CAL: CANCELLED", LCD_YELLOW);
+			return;
+		}
+		if (Key_check(0U, KEY_FLAG_DOWN)) {
+			GraySensor_CalibrateSample(GraySensor, 1U);
+			break;
+		}
+		delay_ms(20U);
+	}
+
+	/* Step 2: sample black line */
+	LCD_ShowStatusLine("CAL:BLACK K1/K3", LCD_CYAN);
+	BuzzerBee(buzzer);
+	while (1) {
+		BuzzerDataUpdate(buzzer);
+		if (Key_check(2U, KEY_FLAG_DOWN)) {
+			LCD_ShowStatusLine("CAL: CANCELLED", LCD_YELLOW);
+			return;
+		}
+		if (Key_check(0U, KEY_FLAG_DOWN)) {
+			GraySensor_CalibrateSample(GraySensor, 0U);
+			break;
+		}
+		delay_ms(20U);
+	}
+
+	GraySensor_RecalcNorm(GraySensor);
+	GraySensor->last_turn_angle = 0.0f;
+	LCD_ShowStatusLine("CAL: DONE!", LCD_GREEN);
+	BuzzerBee(buzzer);
+}
+
 void GraySensorDataUpdate (GraySensor_t* GraySensor)
 {
 	uint16_t *rawDestination[GRAY_SENSOR_CHANNEL_COUNT] = {
@@ -162,7 +244,7 @@ void GraySensorDataUpdate (GraySensor_t* GraySensor)
 			(uint8_t)(channel & 0x01U));
 
 		/* Allow the external analog multiplexer output to settle. */
-		delay_us(1U);
+		delay_us(GRAYSENSOR_MUX_SETTLE_US);
 
 		/* The vendor example averages eight samples for every channel. */
 		for (sample = 0U; sample < GRAY_SENSOR_SAMPLE_COUNT; sample++)
@@ -176,10 +258,10 @@ void GraySensorDataUpdate (GraySensor_t* GraySensor)
 
 	SET_SELECTOR(0,0,0);
 	
-	// µÚ¶ş²½£ºÊ¹ÓÃ¹éÒ»»¯ÏµÊı´¦ÀíADCÔ­Ê¼Öµ²¢ÓëãĞÖµ±È½Ï
+	// ç¬¬äºŒæ­¥ï¼šä½¿ç”¨å½’ä¸€åŒ–ç³»æ•°å¤„ç†ADCåŸå§‹å€¼å¹¶ä¸é˜ˆå€¼æ¯”è¾ƒ
 	uint16_t normalized_adc[8];
 	
-	// ¶ÔÃ¿¸ö´«¸ĞÆ÷µÄADCÖµ½øĞĞ¹éÒ»»¯´¦Àí
+	// å¯¹æ¯ä¸ªä¼ æ„Ÿå™¨çš„ADCå€¼è¿›è¡Œå½’ä¸€åŒ–å¤„ç†
 	for(int i = 0; i < 8; i++)
 	{
 		uint16_t* adc_raw_ptr[] = {
@@ -187,12 +269,12 @@ void GraySensorDataUpdate (GraySensor_t* GraySensor)
 			&GraySensor->adc4_raw, &GraySensor->adc5_raw, &GraySensor->adc6_raw, &GraySensor->adc7_raw
 		};
 		
-		if(GraySensor->normal_factor[i] > 0.0f)  // ÓĞĞ§Í¨µÀ
+		if(GraySensor->normal_factor[i] > 0.0f)  // æœ‰æ•ˆé€šé“
 		{
-			// ¹éÒ»»¯´¦Àí£º(Ô­Ê¼Öµ - ºÚÉ«Öµ) * ¹éÒ»»¯ÏµÊı
+			// å½’ä¸€åŒ–å¤„ç†ï¼š(åŸå§‹å€¼ - é»‘è‰²å€¼) * å½’ä¸€åŒ–ç³»æ•°
 			float temp = ((float)(*adc_raw_ptr[i]) - (float)GraySensor->calibrated_black[i]) * GraySensor->normal_factor[i];
 			
-			// ÏŞÖÆÔÚÓĞĞ§·¶Î§ÄÚ
+			// é™åˆ¶åœ¨æœ‰æ•ˆèŒƒå›´å†…
 			if(temp < 0) temp = 0;
 			if(temp > GraySensor->adc_bits) temp = GraySensor->adc_bits;
 			
@@ -200,7 +282,7 @@ void GraySensorDataUpdate (GraySensor_t* GraySensor)
 		}
 		else
 		{
-			normalized_adc[i] = *adc_raw_ptr[i];  // ÎŞĞ§Í¨µÀÖ±½ÓÊ¹ÓÃÔ­Ê¼Öµ
+			normalized_adc[i] = *adc_raw_ptr[i];  // æ— æ•ˆé€šé“ç›´æ¥ä½¿ç”¨åŸå§‹å€¼
 		}
 	}
 	
@@ -222,8 +304,8 @@ void GraySensorDataUpdate (GraySensor_t* GraySensor)
 //	uart_printf(normalized_adc[7]);
 //	uart_printf(321);
 		//uart_printf(normalized_adc[0]);
-	// Ê¹ÓÃ¹éÒ»»¯ºóµÄÖµÓëãĞÖµ±È½Ï£¬»ñµÃÊı×ÖÖµ
-	uint16_t normalized_threshold = GraySensor->adc_bits / 2;  // Ê¹ÓÃÂúÁ¿³ÌµÄÒ»°ë×÷ÎªãĞÖµ
+	// ä½¿ç”¨å½’ä¸€åŒ–åçš„å€¼ä¸é˜ˆå€¼æ¯”è¾ƒï¼Œè·å¾—æ•°å­—å€¼
+	uint16_t normalized_threshold = GraySensor->adc_bits / 2;  // ä½¿ç”¨æ»¡é‡ç¨‹çš„ä¸€åŠä½œä¸ºé˜ˆå€¼
 	
 	GraySensor->bit0 = (normalized_adc[0] > normalized_threshold) ? 1 : 0;
 	GraySensor->bit1 = (normalized_adc[1] > normalized_threshold) ? 1 : 0;
@@ -251,18 +333,18 @@ void GraySensorDataUpdate (GraySensor_t* GraySensor)
 
 float GraySensorToTurnAngle(GraySensor_t* GraySensor)
 {
-    // ´«¸ĞÆ÷Î»ÖÃÈ¨ÖØ (´Ó×óµ½ÓÒ: bit0µ½bit7)
-    // ¸ºÖµ±íÊ¾×óÆ«£¬ÕıÖµ±íÊ¾ÓÒÆ«
+    // ä¼ æ„Ÿå™¨ä½ç½®æƒé‡ (ä»å·¦åˆ°å³: bit0åˆ°bit7)
+    // è´Ÿå€¼è¡¨ç¤ºå·¦åï¼Œæ­£å€¼è¡¨ç¤ºå³å
     const float sensorWeights[8] = {3.0f, 1.5f, 0.5f, 0.10f, -0.10f, -0.5f, -1.5f, -3.0f};
     
-    float weightedSum = 0.0f;    // ¼ÓÈ¨Î»ÖÃºÍ
-    float totalWeight = 0.0f;    // ×ÜÈ¨ÖØ
-    uint8_t lineCount = 0;       // ¼ì²âµ½ºÚÏßµÄ´«¸ĞÆ÷ÊıÁ¿
+    float weightedSum = 0.0f;    // åŠ æƒä½ç½®å’Œ
+    float totalWeight = 0.0f;    // æ€»æƒé‡
+    uint8_t lineCount = 0;       // æ£€æµ‹åˆ°é»‘çº¿çš„ä¼ æ„Ÿå™¨æ•°é‡
     
-    // ¼ÆËã¼ÓÈ¨Î»ÖÃ
+    // è®¡ç®—åŠ æƒä½ç½®
     for(int i = 0; i < 8; i++)
     {
-        // ¼ì²âµ½ºÚÏßÊ±(´«¸ĞÆ÷ÖµÎª0)
+        // æ£€æµ‹åˆ°é»‘çº¿æ—¶(ä¼ æ„Ÿå™¨å€¼ä¸º0)
         if(!(GraySensor->BinaryData & (1 << i)))
         {
             weightedSum += sensorWeights[i];
@@ -271,25 +353,23 @@ float GraySensorToTurnAngle(GraySensor_t* GraySensor)
         }
     }
     
-    // Èç¹ûÃ»ÓĞ¼ì²âµ½ÈÎºÎºÚÏß£¬·µ»Ø0£¨Ö±ĞĞ£©
+    // çŸ­æš‚ä¸¢çº¿æ—¶ä¿æŒä¸Šä¸€æ¬¡æœ‰æ•ˆè½¬å‘ï¼Œé¿å…å¼¯é“ç›´è¡Œå†²å‡º
     if(lineCount == 0)
     {
-        return 0.0f;
+        return GraySensor->last_turn_angle;
     }
     
-    // ¼ÆËãÆ½¾ùÎ»ÖÃÆ«²î
+    // è®¡ç®—å¹³å‡ä½ç½®åå·®
     float positionError = weightedSum / totalWeight;
     
-    // ¸ù¾İ¼ì²âµ½µÄ´«¸ĞÆ÷ÊıÁ¿ºÍÎ»ÖÃÆ«²î¼ÆËã×ªÏò½Ç¶È
-    float turnAngle = 0.0f;
-    
-
-    turnAngle = positionError * 10.0f;
+    // æ ¹æ®æ£€æµ‹åˆ°çš„ä¼ æ„Ÿå™¨æ•°é‡å’Œä½ç½®åå·®è®¡ç®—è½¬å‘è§’åº¦
+    float turnAngle = positionError * 10.0f;
+    GraySensor->last_turn_angle = turnAngle;
         
     return turnAngle;
 
-/* Ô­Ê¼ÀëÉ¢Âß¼­´úÂë±£Áô×÷Îª²Î¿¼
-//ËÙ¶È50Ê±µÄ²ÎÊı
+/* åŸå§‹ç¦»æ•£é€»è¾‘ä»£ç ä¿ç•™ä½œä¸ºå‚è€ƒ
+//é€Ÿåº¦50æ—¶çš„å‚æ•°
 	if(!(GraySensor->BinaryData&0x01)) return +55;
 	else if(!(GraySensor->BinaryData&0x80)) return -55;
 	else if(!(GraySensor->BinaryData&0x02)) return +20;
@@ -301,7 +381,7 @@ float GraySensorToTurnAngle(GraySensor_t* GraySensor)
 	else if(!(GraySensor->BinaryData&0x10)) return -5 ;
 //	else return 0;
 //	
-//ËÙ¶È80Ê±µÄ²ÎÊı
+//é€Ÿåº¦80æ—¶çš„å‚æ•°
 //	if(!(GraySensor->BinaryData&0x01)) return +60;
 //	else if(!(GraySensor->BinaryData&0x80)) return -60;
 //	else if(!(GraySensor->BinaryData&0x02)) return +40;
@@ -312,7 +392,7 @@ float GraySensorToTurnAngle(GraySensor_t* GraySensor)
 //	else if(!(GraySensor->BinaryData&0x08)) return +10;
 //	else if(!(GraySensor->BinaryData&0x10)) return -10 ;
 //	else return 0;
-//ËÙ¶È100Ê±µÄ²ÎÊı
+//é€Ÿåº¦100æ—¶çš„å‚æ•°
 //	if(!(GraySensor->BinaryData&0x01)) return +90;
 //	else if(!(GraySensor->BinaryData&0x80)) return -90;
 //	else if(!(GraySensor->BinaryData&0x02)) return +60;
@@ -323,7 +403,7 @@ float GraySensorToTurnAngle(GraySensor_t* GraySensor)
 //	else if(!(GraySensor->BinaryData&0x08)) return +15;
 //	else if(!(GraySensor->BinaryData&0x10)) return -15 ;
 //	else return 0;
-//ËÙ¶È130Ê±µÄ²ÎÊı
+//é€Ÿåº¦130æ—¶çš„å‚æ•°
 //	if(!(GraySensor->BinaryData&0x01)) return +40;
 //	else if(!(GraySensor->BinaryData&0x80)) return -40;
 //	else if(!(GraySensor->BinaryData&0x02)) return +25;

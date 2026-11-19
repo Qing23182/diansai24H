@@ -2,7 +2,7 @@
 
 A beginner-friendly firmware project for a **TI MSPM0G3507** smart car designed for the **2024 National Undergraduate Electronics Design Contest (Problem H — Autonomous Driving Car)**.
 
-It integrates closed-loop motor speed control, **ICM42688** IMU attitude estimation (Mahony filter), 8-channel ADC grayscale line tracking, GPIO-interrupt wheel encoders, an ST7735 SPI LCD debug screen, a 4-task state machine, and **VOFA+** telemetry/tuning.
+It includes closed-loop motor speed control, **ICM42688** IMU attitude estimation (Mahony filter with dynamic acceleration gating), 8-channel ADC grayscale line tracking with runtime calibration, quadrature EXTI wheel encoders, an ST7735 SPI LCD debug screen, a 4-task state machine with `StartYaw` anchoring, and **VOFA+** live PID tuning.
 
 ---
 
@@ -22,10 +22,9 @@ It integrates closed-loop motor speed control, **ICM42688** IMU attitude estimat
 ### Step 1: Build and Flash
 
 **Option A — Keil MDK (Easiest for Beginners):**
-1. Open `keil/M0.uvprojx`.
-2. Select target `M0`.
-3. Verify the MSPM0 SDK path matches `C:\ti\mspm0_sdk_2_10_00_04`.
-4. Press **`F7`** to build, then **Download** to flash the board.
+1. Open `keil/M0.uvprojx`, select target `M0`.
+2. Verify the MSPM0 SDK path matches `C:\ti\mspm0_sdk_2_10_00_04`.
+3. Press **`F7`** to build, then **Download** to flash.
 
 **Option B — CMake + ARM GCC (Command Line / VS Code):**
 ```powershell
@@ -34,60 +33,54 @@ cmake --build build
 ```
 This outputs `build/M0.elf`, `M0.hex`, and `M0.bin` (flashable via `openocd.cfg`).
 
-### Step 2: Power On & Verify Sensors (Current Default Mode)
-> **Important:** In `main.c`, the project is currently configured in **bench/sensor debug mode** (`Time_Init()`, `duty_50hz()`, `Key_Task_Handle()`, and `Vofa_Task()` are commented out).
+### Step 2: Power On & Check the LCD
+Keep the car **still on a flat surface for ~2 seconds** at power-on while `ICM42688_Init()` calibrates gyro bias and `IMU_Attitude_Init()` averages initial tilt.
 
-When you power on the car:
-1. Keep the car **still on a flat surface for ~1–2 seconds** while `ICM42688_Init()` calibrates gyro bias.
-2. Watch the ST7735 LCD update every 100 ms:
-   - **`Gray:`** changes from `0xFF` (all white) when you pass a black line under the 8 sensors.
-   - **`Yaw:` / `YawT:`** change smoothly as you rotate the car by hand.
-3. Open **VOFA+** on `UART_1` (`PA21`/`PA22`, 115200 baud, **FireWater** protocol) to view live Euler angles (`Vofa_SendEulerFireWater`).
+Check row 9 (bottom status line) on the ST7735 LCD:
+- **`IMU: OK` (green):** IMU initialized properly.
+- **`IMU ERR:0xXX` (red + beep):** Check `ICM42688` SPI0 wiring and `PB21` CS pin.
 
-### Step 3: Switching to Full Autonomous Task Mode
-Once your IMU, grayscale sensor, encoders, and motors are verified on the bench, open `main.c` and:
-1. Uncomment `duty_10hz()`, `duty_50hz()`, `Time_Init()`, and the `controlflag` / `imuflag` / `vofaflag` / `Key_Task_Handle()` / `Vofa_Task()` blocks.
-2. Comment out the bench-polling `Vofa_SendEulerFireWater` / `GraySensorDataUpdate` blocks in `while (1)`.
-3. Rebuild and flash — you can then start Tasks 1–4 with the onboard keys:
-   - **Key 1 (`PB18`):** Task 1 (A → B straight line)
-   - **Key 2 (`PB20`):** Task 2 (A → B → C → D → A loop)
-   - **Key 3 (`PB22`):** Task 3 (A → C → B → D → A, 1 lap)
-   - **Key 4:** Task 4 (A → C → B → D → A, 4 laps — *note: check `read_pin(4)` in `Drive/Key.c` if you wire a dedicated 4th key pin*)
+### Step 3: Calibrate the Grayscale Sensor (Recommended at Every New Venue)
+1. While idle, **long-press Key 1 (`PB18`) for ~2 seconds** until the LCD shows `CAL:WHITE K1/K3`.
+2. Place all 8 sensors over the **white background**, then press **Key 1** (press **Key 3** anytime to cancel).
+3. When the LCD shows `CAL:BLACK K1/K3`, place the sensors over the **black line**, then press **Key 1**.
+4. Wait for `CAL: DONE!` and a confirmation beep.
+
+### Step 4: Run a Task & Emergency Stop (3-Key Controls)
+- **Start a task (while idle):**
+  - **Key 1 (`PB18`) short-press:** Task 1 (A → B straight line)
+  - **Key 2 (`PB20`) short-press:** Task 2 (A → B → C → D → A loop)
+  - **Key 3 (`PB22`) short-press:** Task 3 (A → C → B → D → A, 1 lap)
+  - **Key 3 (`PB22`) double-click:** Task 4 (A → C → B → D → A, 4 laps)
+- After selection, the car beeps for a **1-second launch countdown** (`T* ARMING...`) so you can release the car safely.
+- **Emergency Stop (E-STOP):** Press **any key (K1–K3)** while counting down or driving to immediately stop the motors (`E-STOP!`).
+
+> **Bench Debug Mode:** If you want to test only the IMU (FireWater Euler stream) + grayscale + LCD without running tasks, set `#define APP_BENCH_DEBUG_MODE 1` in `Drive/app_config.h`.
 
 ---
 
 ## 3. Project Layout
 
 ```text
-main.c                  Entry point (bench sensor debug loop & commented task scheduler)
+main.c                  Main loop & task scheduler (100Hz IMU, 50Hz control, 20Hz VOFA)
+Drive/app_config.h      <-- START HERE: mode switch, PIDs, speeds, wheel specs & safety limits
 M0.syscfg               SysConfig peripheral & pinout configuration
 ti_msp_dl_config.c/.h   Auto-generated by SysConfig (do not edit manually)
-Drive/
-  headfile.h            Central include + PID, wheel, speed, and task parameter macros
-  databyte.h            Shared structs (Car_t, Motors_t, Pid_t, GraySensor_t, Task_t, etc.)
-  motor.c/.h            PWM output helpers (TIMG7)
-  EncoderExti.c/.h      GPIO external-interrupt encoder counting
-  Key.c/.h              Key scanner & task trigger handler
-  LCD_ST7735.c/.h       ST7735 SPI LCD driver & 8-row debug screen
-  pid.c/.h              Position & incremental (delta) PID controller
-  Beep.c / LED.c        Buzzer PWM (TIMG6) & status LED
-  Delay.c / spi.c / uart.c  SysTick timing, SPI, and UART drivers
-apply/
-  ICM42688.c/.h         ICM42688 SPI IMU driver & gyro calibration
-  GraySensor.c/.h       8-channel ADC grayscale sampling, normalization & turn angle
-  Encoder.c/.h          Wheel angular/linear velocity and distance calculation
-  MotorControl.c/.h     L298N direction control & cascaded speed/turn PID
-  Time.c/.h             Timer ISRs (TIMER_0 / TIMER_1 / TIMER_2)
-  vofa.c/.h             VOFA+ telemetry (FireWater & JustFloat) + online PID tuning
-Algorithm/
-  imu_attitude.c/.h     Attitude wrapper & continuous yaw unwrapping (YawTotalAngle)
-  mahony_filter.c/.h    Mahony quaternion attitude estimator (active)
-  kalman_filter.c / QuaternionEKF.c  Optional CMSIS-DSP EKF modules
-Task/
-  task.c/.h             Task 1–4 state machines for 2024 NUEDC Problem H
+Drive/                  Hardware drivers (PWM, L298N, EXTI encoders, Key, LCD, UART, SPI, PID)
+apply/                  Mid-level modules (ICM42688, GraySensor, Encoder, MotorControl, Time, VOFA)
+Algorithm/              Mahony quaternion attitude estimator + dynamic accel gating + yaw unwrap
+Task/                   Task 1–4 state machines with StartYaw anchoring & odometry guards
 keil/                   Keil MDK project, scatter file, and startup assembly
 cmake/ & openocd.cfg    ARM GCC toolchain file and OpenOCD flash config
 ```
+
+### Control Loop Timing
+| Timer | Frequency | Purpose |
+| :--- | :--- | :--- |
+| `TIMER_0` (`TIMG0`) | **100 Hz** (10 ms) | `duty_100hz()` — reads ICM42688 & updates Mahony attitude |
+| `TIMER_1` (`TIMA1`) | **50 Hz** (20 ms) | `duty_50hz()` — updates buzzer, reads encoders, runs active task & motor PIDs |
+| `TIMER_2` (`TIMA0`) | **20 Hz** (50 ms) | `Vofa_SendJustFloat()` — streams 10 telemetry channels to VOFA+ |
+| `SysTick` | **1000 Hz** (1 ms) | `millis()` / `micros()` timing & key debouncing (`Key_Tick()`) |
 
 ---
 
@@ -97,34 +90,33 @@ cmake/ & openocd.cfg    ARM GCC toolchain file and OpenOCD flash config
 | :--- | :--- | :--- |
 | **Motor PWM** | `TIMG7` (`PWM_0`) | Left: `PA17`, Right: `PA18` |
 | **Motor Direction (L298N)** | GPIO (`Motor`) | Left: `PA23` / `PB25`, Right: `PB27` / `PA24` |
-| **Left Encoder (EXTI)** | GPIO (`Encoder1`) | A1 (IRQ): `PB23`, B1: `PB24` |
-| **Right Encoder (EXTI)** | GPIO (`Encoder2`) | A2 (IRQ): `PA25`, B2: `PA26` |
+| **Left Encoder (EXTI)** | GPIO (`Encoder1`) | A1 (IRQ): `PB23`, B1 (Dir): `PB24` |
+| **Right Encoder (EXTI)** | GPIO (`Encoder2`) | A2 (IRQ): `PA25`, B2 (Dir): `PA26` |
 | **8-Ch Grayscale Sensor** | `ADC1_CH0` + GPIO MUX | ADC: `PA15`, Select: `PB13` / `PB15` / `PA16` |
 | **IMU (`ICM42688`)** | `SPI0` (`SPI_0`) | SCLK: `PA12`, MOSI: `PB17`, MISO: `PB19`, CS: `PB21` |
 | **ST7735 LCD** | `SPI1` (`SPI_1`) | SCLK: `PB9`, MOSI: `PB8`, CS: `PB14`, RES: `PB10`, DC: `PB11`, BL: `PB26` |
 | **Keys (Active Low)** | GPIO (`Key`) | K1: `PB18`, K2: `PB20`, K3: `PB22` |
 | **LED & Buzzer** | GPIO / `TIMG6` (`PWM_Buzzer`) | LED: `PB16`, Buzzer: `PA29` |
-| **VOFA+ UART** | `UART2` (`UART_1`, 115200) | TX: `PA21`, RX: `PA22` |
-| **General UART** | `UART3` (`UART_0`, 115200) | TX: `PA14`, RX: `PA13` |
-| **Extra UARTs** | `UART0` (`UART_2`), `UART1` (`UART_3`) | `PA10`/`PA11`, `PA8`/`PA9` |
+| **VOFA+ UART** | `UART0` (`UART_2`, 115200) | TX: `PA10`, RX: `PA11` |
+| **General Framed UART** | `UART3` (`UART_0`, 115200) | TX: `PA14`, RX: `PA13` |
+| **Extra UARTs** | `UART2` (`UART_1`), `UART1` (`UART_3`) | `PA21`/`PA22`, `PA8`/`PA9` |
 
 ---
 
-## 5. Where to Tune Parameters
+## 5. Tuning & VOFA+ Live Debugging
 
-All main tuning macros live in **`Drive/headfile.h`**:
-- **Speed PID:** `BrushMotor_PID_KP`, `BrushMotor_PID_KI`, `BrushMotor_PID_KD`
-- **Steering PID:** `SelfTurn_PID_KP`, `SelfTurn_PID_KI`, `SelfTurn_PID_KD`
-- **Wheel / Encoder Specs:** `EncoderReadingFrequency` (`50.0f`), `EncoderLines` (`390.0f`), `TireRadius` (`6.5f` cm)
-- **Task Speeds & Diagonal Angles:** `TASK1_SPEED`, `TASK2_STRAIGHT_SPEED`, `TASK2_TRACE_SPEED`, `TASK34_DIAG_ANGLE` (`38.66°`)
-- **Grayscale Calibration:** `calibrated_white[8]` and `calibrated_black[8]` in `apply/GraySensor.c`
+All key tuning parameters live in **`Drive/app_config.h`**:
+- **Inner Speed PID:** `BrushMotor_PID_*`
+- **Line-Follow PID:** `SelfTurn_PID_*` (grayscale error `±30`)
+- **Heading-Hold PID:** `YawHold_PID_*` (IMU yaw error in **radians**)
+- **Safety & Odometry:** `TASK_START_DELAY_TICKS`, `TASK_BLIND_DIST_CM` (`15 cm`), `TASK_MAX_LEG_DIST_CM` (`250 cm`)
 
-### VOFA+ Live Debugging (`UART_1`, `PA21`/`PA22`, 115200 8N1)
-- **FireWater mode (default in `main.c`):** Streams Roll/Pitch/Yaw Euler angles via `Vofa_SendEulerFireWater()` (and optionally raw grayscale via `Vofa_SendGrayFireWater()`).
-- **JustFloat mode (task tuning):** Streams 8 channels (Left set/fdb/out, Right set/fdb/out, Turn PID err/out) via `Vofa_SendJustFloat()`.
+Connect a USB-to-TTL adapter to **`UART_2` (`PA10` TX / `PA11` RX)** at **115200 baud, 8N1**:
+- **Task Mode (`APP_BENCH_DEBUG_MODE = 0`):** Set VOFA+ to **JustFloat** (10 channels: Left `set/fdb/out`, Right `set/fdb/out`, `PidSelfTurn` `err/out`, `PidYaw` `err/out`).
+- **Bench Mode (`APP_BENCH_DEBUG_MODE = 1`):** Set VOFA+ to **FireWater** to plot live Roll/Pitch/Yaw/YawTotalAngle in degrees.
 - **Online PID Tuning Command (11 bytes):**
   ```text
-  @ <Target: L|R|S|T> <Param: P|I|D> <Op: 1=set|2=add|3=sub> = <4-byte float> ! #
+  @ <Target: L|R|S|T|Y> <Param: P|I|D> <Op: 1=set|2=add|3=sub> = <4-byte float> ! #
   ```
 
 ---
@@ -140,11 +132,11 @@ All main tuning macros live in **`Drive/headfile.h`**:
 | 5 | `Dyaw:` | Heading error in degrees |
 | 6–7 | `VL / VR:` | Left and right wheel speeds |
 | 8 | `PWM :` | Left and right motor PWM outputs |
+| 9 | *(status)* | `IMU: OK` / `IMU ERR`, `ARMING...`, `E-STOP!`, or calibration prompts |
 
 ---
 
 ## 7. SysConfig & Notes
 
-- To modify pins, clocks, or peripherals, edit **`M0.syscfg`** in SysConfig `1.28.0` and regenerate `ti_msp_dl_config.c` / `ti_msp_dl_config.h`.
-- Keep `ARM_MATH_CM0PLUS`, CMSIS-DSP include paths, and `arm_cortexM0l_math.a` intact if you keep `kalman_filter.c` and `QuaternionEKF.c` in the build.
-- Keil build outputs (`keil/Objects`, etc.) and CMake `build/` are ignored by `.gitignore`.
+- Edit **`M0.syscfg`** in SysConfig `1.28.0` and regenerate `ti_msp_dl_config.c/.h` whenever changing pins or clocks.
+- Keep `ARM_MATH_CM0PLUS`, CMSIS-DSP include paths, and `arm_cortexM0l_math.a` if using `kalman_filter.c` / `QuaternionEKF.c`.

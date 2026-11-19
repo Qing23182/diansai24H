@@ -5,7 +5,7 @@
 #define IMU_MAHONY_KP          0.20f
 #define IMU_MAHONY_KI          0.0f
 #define IMU_STATIC_BIAS_ALPHA  0.0008f
-#define IMU_DEFAULT_DT         0.020f
+#define IMU_DEFAULT_DT         0.010f
 #define IMU_MAX_VALID_DT       0.100f
 #define IMU_GRAVITY            9.80665f
 #define IMU_ACCEL_GATE         1.0f
@@ -21,6 +21,12 @@
 IMU_Attitude_t IMU_Attitude;
 static Mahony_t mahony;
 static float yaw_last;
+static uint8_t static_bias_enable = 1U;
+
+void IMU_Attitude_SetStaticBiasEnable(uint8_t enable)
+{
+    static_bias_enable = (enable != 0U) ? 1U : 0U;
+}
 
 static float vector_norm_sq(Axis3f value)
 {
@@ -94,7 +100,9 @@ void IMU_Attitude_Update(float dt)
     }
 
     ICM42688_Read(&ICM42688);
-    ICM42688_UpdateStaticGyroBias(IMU_STATIC_BIAS_ALPHA);
+    if (static_bias_enable != 0U) {
+        ICM42688_UpdateStaticGyroBias(IMU_STATIC_BIAS_ALPHA);
+    }
 
     if (ICM42688.LastGyroSaturated != 0U) {
         return;

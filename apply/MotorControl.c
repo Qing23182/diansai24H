@@ -3,16 +3,17 @@
 
 fp32 BrushMotor_PID[3] = {BrushMotor_PID_KP , BrushMotor_PID_KI	,	BrushMotor_PID_KD	};
 fp32 SelfTurn_PID[3] 	 = {SelfTurn_PID_KP , SelfTurn_PID_KI	,	SelfTurn_PID_KD	};
+fp32 YawHold_PID[3]      = {YawHold_PID_KP , YawHold_PID_KI , YawHold_PID_KD };
 
 void BrushMotorInit (BrushMotor_t* BrushMotor , int ERF , int EL , float TR)
 {
 	BrushMotor->state = Disable; 
 
-	/*---------- 控制参数 ----------*/
+	/*---------- 鎺у埗鍙傛暟 ----------*/
 	BrushMotor->ERF= ERF;
 	BrushMotor->EL=  EL;
 	BrushMotor->TR=  TR;
-	BrushMotor->ExpectOutput = 0;
+	BrushMotor->ExpectOutput = 0.0f;
 	BrushMotor->Output = 0;
 }
 
@@ -26,6 +27,7 @@ void MotorInit (Motors_t** Motors)
  static BrushMotor_t motorLeftFront;
  static BrushMotor_t motorRightFront;
  static Pid_t pidselfturn;
+ static Pid_t pidyaw;
  static Pid_t pidLeftFront;
  static Pid_t pidRightFront;
  
@@ -33,6 +35,7 @@ void MotorInit (Motors_t** Motors)
  motors.MotorRight = &motorRightFront;
  
  motors.PidSelfTurn=&pidselfturn;
+ motors.PidYaw=&pidyaw;
  
  motors.Left=&pidLeftFront;
  motors.Right=&pidRightFront;
@@ -41,6 +44,7 @@ void MotorInit (Motors_t** Motors)
  BrushMotorInit(motors.MotorRight,EncoderReadingFrequency,EncoderLines,TireRadius);
  
  PID_init(motors.PidSelfTurn,SelfTurn_PID_mode ,SelfTurn_PID ,SelfTurn_PID_Maxout,SelfTurn_PID_MaxIout);
+ PID_init(motors.PidYaw,YawHold_PID_mode ,YawHold_PID ,YawHold_PID_Maxout,YawHold_PID_MaxIout);
  PID_init(motors.Left,BrushMotor_PID_mode,BrushMotor_PID,BrushMotor_PID_Maxout,BrushMotor_PID_MaxIout);
  PID_init(motors.Right,BrushMotor_PID_mode,BrushMotor_PID,BrushMotor_PID_Maxout,BrushMotor_PID_MaxIout);
  
@@ -60,15 +64,24 @@ void MotorsPWMSet(Motors_t* Motors)
 
 void MotorStop(Motors_t* Motors)
 {
+	if (Motors == NULL) {
+		return;
+	}
+	Motors->MotorLeft->ExpectOutput=0.0f;
+	Motors->MotorRight->ExpectOutput=0.0f;
 	Motors->MotorLeft->Output=0;
 	Motors->MotorRight->Output=0;
+	PID_clear(Motors->Left);
+	PID_clear(Motors->Right);
+	PID_clear(Motors->PidSelfTurn);
+	PID_clear(Motors->PidYaw);
 	
 	MotorDataUpdate(Motors);
 	
 }
 
 
-//如果使用Drv8701E,一般来说都是正向前进，几乎没有反转
+//濡傛灉浣跨敤Drv8701E,涓�鑸潵璇撮兘鏄鍚戝墠杩涳紝鍑犱箮娌℃湁鍙嶈浆
 //void MotorDirectionSet(Motors_t* Motors)
 //{
 //	(Motors->MotorLeft->Output>0)?(DL_GPIO_setPins(Motor_PIN_7_PORT,Motor_PIN_7_PIN)):(DL_GPIO_clearPins(Motor_PIN_7_PORT,Motor_PIN_7_PIN));
@@ -76,7 +89,7 @@ void MotorStop(Motors_t* Motors)
 //	
 //}
 
-//如果使用L892N
+//濡傛灉浣跨敤L892N
 void MotorDirectionSet(Motors_t* Motors)
 {
     (Motors->MotorLeft->Output > 0) ?
@@ -105,6 +118,16 @@ void MotorPidCtrl (Motors_t* Motors,fp32 TurnAngleSet,fp32 AverageSpeedSet)
 	Motors->MotorLeft->Output=PID_Calc(Motors->Left,Motors->EncoderLeft->V,Motors->MotorLeft->ExpectOutput);
 	Motors->MotorRight->Output=PID_Calc(Motors->Right,Motors->EncoderRight->V,Motors->MotorRight->ExpectOutput);
 	
+}
+
+void MotorYawPidCtrl (Motors_t* Motors,fp32 YawErrorRad,fp32 AverageSpeedSet)
+{
+	float ExpectDifferentia=PID_Calc(Motors->PidYaw,YawErrorRad,0);
+	Motors->MotorLeft->ExpectOutput=AverageSpeedSet-ExpectDifferentia;
+	Motors->MotorRight->ExpectOutput=AverageSpeedSet+ExpectDifferentia;
+	
+	Motors->MotorLeft->Output=PID_Calc(Motors->Left,Motors->EncoderLeft->V,Motors->MotorLeft->ExpectOutput);
+	Motors->MotorRight->Output=PID_Calc(Motors->Right,Motors->EncoderRight->V,Motors->MotorRight->ExpectOutput);
 }
 
 void MotorDataUpdate (Motors_t* Motors)

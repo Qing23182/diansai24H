@@ -3,7 +3,10 @@
 
 VofaCommand_t vofa_command;
 volatile uint8_t vofa_rx_index;
+static volatile uint32_t vofa_last_rx_ms;
 static Motors_t *vofa_motors;
+
+#define VOFA_RX_FRAME_TIMEOUT_MS 20U
 
 
 void Vofa_SendByte(uint8_t data)
@@ -137,8 +140,14 @@ static void Vofa_FloatToBytes(float value, uint8_t data[4])
 
 void Vofa_UartReceiveByte(uint8_t byte)
 {
-  
-    if (vofa_rx_index == 0) {
+    uint32_t now_ms = get_systick_ms();
+
+    if ((vofa_rx_index > 0U) && ((now_ms - vofa_last_rx_ms) > VOFA_RX_FRAME_TIMEOUT_MS)) {
+        vofa_rx_index = 0U;
+    }
+    vofa_last_rx_ms = now_ms;
+
+    if (vofa_rx_index == 0U) {
         if (byte != '@') {
             return;
         }
@@ -172,6 +181,9 @@ static Pid_t *Vofa_GetPid(uint8_t target)
 
         case VOFA_PID_TURN:
             return vofa_motors->PidSelfTurn;
+
+        case VOFA_PID_YAW:
+            return vofa_motors->PidYaw;
 
         default:
             return NULL;
@@ -261,6 +273,10 @@ static uint8_t Vofa_ParseCommand(void)
         return 0U;
     }
 
+    if (vofa_motors == NULL) {
+        return 0U;
+    }
+
     /* S updates both left and right wheel speed loops. */
     if (target == VOFA_PID_SPEED) {
         uint8_t left_ok;
@@ -314,6 +330,8 @@ void Vofa_Init(Motors_t *motors)
 
     memset(&vofa_command, 0, sizeof(vofa_command));
 
+    DL_UART_Main_clearInterruptStatus(UART_2_INST, DL_UART_MAIN_INTERRUPT_RX);
+    DL_UART_Main_enableInterrupt(UART_2_INST, DL_UART_MAIN_INTERRUPT_RX);
     NVIC_ClearPendingIRQ(UART_2_INST_INT_IRQN);
     NVIC_EnableIRQ(UART_2_INST_INT_IRQN);
 }
@@ -321,6 +339,14 @@ void Vofa_Init(Motors_t *motors)
 void Vofa_SendJustFloat(void)
 {
     uint8_t bytes[4];
+
+    if ((vofa_motors == NULL) ||
+        (vofa_motors->Left == NULL) ||
+        (vofa_motors->Right == NULL) ||
+        (vofa_motors->PidSelfTurn == NULL) ||
+        (vofa_motors->PidYaw == NULL)) {
+        return;
+    }
 
     float channels[VOFA_CHANNEL_COUNT] = {
         vofa_motors->Left->set,
@@ -332,7 +358,10 @@ void Vofa_SendJustFloat(void)
         vofa_motors->Right->out,
 
         vofa_motors->PidSelfTurn->error[0],
-        vofa_motors->PidSelfTurn->out
+        vofa_motors->PidSelfTurn->out,
+
+        vofa_motors->PidYaw->error[0],
+        vofa_motors->PidYaw->out
     };
 
     static const uint8_t tail[4] = {

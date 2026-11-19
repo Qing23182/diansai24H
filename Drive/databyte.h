@@ -34,7 +34,7 @@ typedef double fp64;                 /* 64 位浮点数 */
 #define MAX_DATA_LEN 256                         /* 串口数据帧最大有效数据长度 */
 
 //vofa定义
-#define VOFA_CHANNEL_COUNT  8
+#define VOFA_CHANNEL_COUNT  10
 #define VOFA_FRAME_TAIL_SIZE 4
 #define VOFA_CMD_FRAME_SIZE 11
 
@@ -51,7 +51,8 @@ typedef enum {
     VOFA_PID_LEFT  = 'L',//左轮速度环
     VOFA_PID_RIGHT = 'R',//右轮速度环
     VOFA_PID_SPEED = 'S',//左右轮速度环
-    VOFA_PID_TURN  = 'T'//转向环
+    VOFA_PID_TURN  = 'T',//灰度巡线转向环
+    VOFA_PID_YAW   = 'Y' //航向保持转向环
 } VofaPidTarget_t;
 
 typedef enum {
@@ -83,13 +84,13 @@ typedef struct {
 
 /* 编码器数据结构*/
 typedef struct {
-    int v_int;                                   /* 原始速度值 */
-    int t_int;                                   /* 占空比值 */
-    int EncoderCount;                            /* 编码器累计脉冲计数 */
+    int32_t v_int;                               /* 原始速度值 */
+    int32_t t_int;                               /* 占空比值 */
+    volatile int32_t EncoderCount;               /* 编码器累计脉冲计数 */
     float pos;                                   /* 换算后的位置，单位 rad */
     float vel;                                   /* 换算后的速度，单位 rad/s */
-    float V;                                     /* 反馈电压或解析得到的电压值 */
-    float X;                                     /* 预留的位置或位移数据 */
+    float V;                                     /* 线速度 cm/s */
+    float X;                                     /* 累计位移 cm */
 } Encoder_t;
 
 /* PID 控制器参数和运行状态 */
@@ -122,19 +123,20 @@ typedef struct {
 	  int ERF;                                   /*编码器读取频率*/
 	  int EL;                                     /*编玛器线数*/
 	  float TR;                                  /*轮胎半径*/	  
-	  int ExpectOutput;
+	  fp32 ExpectOutput;
 	  int Output;
 } BrushMotor_t;
 
 /* 电机组结构 */
 typedef struct {
-    Pid_t* PidSelfTurn;
-	  BrushMotor_t* MotorLeft;
-	  BrushMotor_t* MotorRight;
-	  Encoder_t* EncoderLeft;
-	  Encoder_t* EncoderRight;
-	  Pid_t* Left;
-	  Pid_t* Right;
+    Pid_t* PidSelfTurn;                          /* 灰度巡线转向环 PID */
+    Pid_t* PidYaw;                               /* IMU 航向保持 PID */
+    BrushMotor_t* MotorLeft;
+    BrushMotor_t* MotorRight;
+    Encoder_t* EncoderLeft;
+    Encoder_t* EncoderRight;
+    Pid_t* Left;
+    Pid_t* Right;
 } Motors_t;
 
 /* 系统采样时间状态 */
@@ -145,12 +147,11 @@ typedef struct {
     volatile uint16_t period_int;                /* 取整后的采样周期，单位 ms */
 } systime;
 
-/* 串口接收环形队列 */
+/* 串口接收环形队列 (单生产者 ISR / 单消费者主循环无锁结构) */
 typedef struct {
     uint8_t buffer[RING_BUF_SIZE];               /* 队列数据缓存区 */
-    uint16_t head;                               /* 出队读取下标 */
-    uint16_t tail;                               /* 入队写入下标 */
-    uint16_t size;                               /* 当前已缓存字节数 */
+    volatile uint16_t head;                      /* 出队读取下标 */
+    volatile uint16_t tail;                      /* 入队写入下标 */
 } RingQueue_t;
 
 /* 串口数据帧解析状态 */
@@ -263,6 +264,7 @@ typedef struct
     // 归一化系数
     float normal_factor[8];        // 每个传感器的归一化系数
     uint16_t adc_bits;             // ADC位数对应的满量程值(如12位=4096)
+    float last_turn_angle;         // 上一次有效巡线转向偏差（短暂丢线保持）
 } GraySensor_t;
 	
 //蜂鸣器
@@ -281,10 +283,12 @@ typedef struct {
 	int16 TaskState;//阶段标志位
   int16 LastTaskStat;//路径计时
 	int16 LapCount;//圈数
+	int16 StartDelayTicks;//发车倒计时 tick (50Hz)
 	
 	float  AverageSpeed;///平均速度
 	float  Deltayaw;//航向偏差
 	float  Datumyaw;//基准航向角
+	float  StartYaw;//发车初始航向角（固定基准，避免弧线出口误差累积）
   	
 }Task_t;
 	
