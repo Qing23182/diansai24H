@@ -596,7 +596,7 @@ void LCD_DebugInit(void)
 
 void LCD_DebugUpdate(Car_t Car)
 {
-    char line[17];
+    char line[32];
     uint16_t color = LCD_WHITE;
     uint8_t row;
     uint8_t checked;
